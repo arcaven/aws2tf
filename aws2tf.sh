@@ -1,45 +1,66 @@
-usage()
-{ echo "Usage: $0 [-d] [-p <profile>(Default="default") ] [-c <yes|no(default)>] [-t <type>] [-r <region>] [-x <yes|no(default)>]" 1>&2; exit 1;
+usage(){
+	echo "Usage: $0 [-p <profile>] [-c] [-v] [-r <region>] [-t <type>] [-h] [-d]"
+  echo "       -p <profile> specify the AWS profile to use (Default=\"default\")"
+  echo "       -c           continue from previous run (Default=\"no\")"
+  echo "       -r <region>  specify the AWS region to use (Default=the aws command line setting)"
+  echo "       -v           stop after terraform validate step"
+  echo "       -h           Help - this message"
+  echo "       -d           Debug - lots of output"
+  echo "       -t <type>    choose a sub-type of AWS resources to get" 
+   echo "           iam"                
+   echo "           org" 
+   echo "           code"
+   echo "           appmesh" 
+   echo "           kms"
+   echo "           lambda" 
+   echo "           rds" 
+   echo "           ecs"
+   echo "           eks"
+   echo "           emr"
+   echo "           secrets" 
+   echo "           lf" 
+   echo "           athena" 
+   echo "           glue" 
+   echo "           sagemaker" 
+   echo "           eb"
+   echo "           ec2"
+   echo "           spot"
+   echo "           tgw"
+   echo "           vpc"
+	exit 1
 }
+
+
+
 x="no"
 p="default" # profile
 f="no"
 v="no"
 r="no" # region
 c="no" # combine mode
-d="no" # debug
+d="no"
 
-while getopts ":p:r:x:f:v:t:i:c:d" o; do
+while getopts ":p:r:x:f:v:t:i:c:d:h:" o; do
     case "${o}" in
-    #    a)
-    #        s=${OPTARG}
-    #    ;;
-        i)
-            i=${OPTARG}
+        h) usage
         ;;
-        t)
-            t=${OPTARG}
+        i) i=${OPTARG}
         ;;
-        r)
-            r=${OPTARG}
+        t) t=${OPTARG}
         ;;
-        x)
-            x="yes"
+        r) r=${OPTARG}
         ;;
-        p)
-            p=${OPTARG}
+        x) x="yes"
         ;;
-        f)
-            f="yes"
+        p) p=${OPTARG}
         ;;
-        v)
-            v="yes"
+        f) f="yes"
         ;;
-        c)
-            c="yes"
+        v) v="yes"
         ;;
-        d)
-            d="yes"
+        c) c="yes"
+        ;;
+        d) d="yes"
         ;;
         
         *)
@@ -48,6 +69,13 @@ while getopts ":p:r:x:f:v:t:i:c:d" o; do
     esac
 done
 shift $((OPTIND-1))
+
+trap ctrl_c INT
+
+function ctrl_c() {
+        echo "Requested to stop."
+        exit 1
+}
 
 if [ "$d" = "yes" ]; then
     set -x
@@ -74,7 +102,6 @@ fi
 
 s=`echo $mysub`
 mkdir -p  generated/tf.$mysub
-mkdir -p  cache
 cd generated/tf.$mysub
 
 
@@ -111,7 +138,6 @@ fi
 export AWS="aws --profile $p --region $r --output json "
 echo " "
 echo "Account ID = ${s}"
-echo "AWS Resource Group Filter = ${g}"
 echo "Region = ${r}"
 echo "AWS Profile = ${p}"
 echo "Extract KMS Secrets to .tf files (insecure) = ${x}"
@@ -209,31 +235,15 @@ if [ "$t" == "eb" ]; then pre="71*"; fi
 if [ "$t" == "ec2" ]; then pre="25*"; fi
 if [ "$t" == "spot" ]; then pre="25*"; fi
 
-if [ "$c" == "no" ]; then
-    echo "terraform init -upgrade"
-    # import cached plugins, if any
-    if [ -d "../../cache/dot_terraform" ]; then
-        cp -a ../../cache/dot_terraform .terraform
-    fi
-    if [ -f "../../cache/dot_terraform.lock.hcl" ]; then
-        cp -a ../../cache/dot_terraform.lock.hcl .terraform.lock.hcl
-    fi
-    terraform init -upgrade -no-color 2>&1 | tee -a import.log
-
-fi
-
-# cache installed plugins for future
-
-if [ ! -d "../../cache/dot_terraform" ]; then
-    cp -a .terraform ../../cache/dot_terraform
-fi
-if [ ! -f "../../cache/dot_terraform.lock.hcl" ]; then
-    cp -a .terraform.lock.hcl ../../cache/dot_terraform.lock.hcl
-fi
-
 exclude="iam"
 
-if [ "$t" == "iam" ]; then pre="03*" && exclude="xxxxxxx"; fi
+if [ "$t" == "iam" ]; then pre="05*" && exclude="xxxxxxx"; fi
+
+if [ "$c" == "no" ]; then
+    echo "terraform init -upgrade"
+    terraform init -upgrade -no-color 2>&1 | tee -a import.log
+fi
+pwd
 ls
 #############################################################################
 date
