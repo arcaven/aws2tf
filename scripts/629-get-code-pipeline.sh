@@ -1,6 +1,6 @@
 #!/bin/bash
 if [ "$1" != "" ]; then
-    cmd[0]="$AWS codepipeline list-pipelines" 
+    cmd[0]="$AWS codepipeline list-pipelines | jq '.pipelines[] | select(.name==\"${1}\")'" 
 else
     cmd[0]="$AWS codepipeline list-pipelines"
 fi
@@ -18,16 +18,24 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
-    count=`echo $awsout | jq ".${pref[(${c})]} | length"`
+    count=1
+    if [ "$1" == "" ]; then
+        count=`echo $awsout | jq ".${pref[(${c})]} | length"`
+    fi
+    #echo $count
     if [ "$count" -gt "0" ]; then
         count=`expr $count - 1`
         
         for i in `seq 0 $count`; do
             #echo $i
-            cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}" | tr -d '"'`
+            if [ "$1" == "" ]; then
+                cname=`echo $awsout | jq -r ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}"`
+            else
+                cname=`echo $awsout | jq -r ".${idfilt[(${c})]}"`
+            fi
             echo "$ttft $cname"
             fn=`printf "%s__%s.tf" $ttft $cname`
             if [ -f "$fn" ] ; then
@@ -35,20 +43,18 @@ for c in `seq 0 0`; do
                 continue
             fi
             printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
+            printf "}" >> $ttft.$cname.tf
             printf "terraform import %s.%s %s" $ttft $cname $cname > data/import_$ttft_$cname.sh
             terraform import $ttft.$cname "$cname" | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $cname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$cname > t1.txt
+            tfa=`printf "%s.%s" $ttft $cname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $ttft.$cname.tf
+
             file="t1.txt"
             echo $aws2tfmess > $fn
+            trole=""
             rarns=()
             allowid=0
             doned=0
@@ -66,8 +72,9 @@ for c in `seq 0 0`; do
                         if [ "$allowid" == "0" ]; then
                             skip=1
                         else
-                            skip=0      
-                        fi
+                            earn=`echo "$tt2" | rev | cut -d'/' -f 1 | rev | tr -d '"'`
+                            t1=`printf "%s = aws_kms_key.k_%s.arn" $tt1 $earn`
+                        fi       
                     fi          
 
                     if [[ ${tt1} == "role_arn" ]];then 
@@ -85,9 +92,8 @@ for c in `seq 0 0`; do
                     if [[ ${tt1} == "location" ]];then 
                                 skip=0;
                                 s3buck=`echo "$tt2" | cut -f2- -d'/' | tr -d '"'`
+                                t1=`printf "%s = aws_s3_bucket.b_%s.id" $tt1 $s3buck`
                     fi
-
-
                     
                     if [[ ${tt1} == "owner_id" ]];then skip=1;fi
                     if [[ ${tt1} == "rule_id" ]];then skip=1;fi
@@ -111,15 +117,23 @@ for c in `seq 0 0`; do
             done <"$file"
             #echo "rarns=$rarns"
             ## role arn
+
+            #if [[ "$trole" != "" ]]; then
+            #    echo "call1 for $trole"
+            #    ../../scripts/050-get-iam-roles.sh $trole
+            #fi
+
+
             for therole in ${rarns[@]}; do
                 #echo "therole=$therole"
                 trole1=`echo $therole | tr -d '"'`
-                #echo "calling for $trole1"
-                if [ "$trole1" != "" ]; then
+                echo "for $trole1"
+                if [[ "$trole1" != "" ]]; then
+                    #echo "calling for $trole1"
                     ../../scripts/050-get-iam-roles.sh $trole1
                 fi
             done           
-            if [ "$s3buck" != "" ]; then
+            if [[ "$s3buck" != "" ]]; then
                 ../../scripts/060-get-s3.sh $s3buck
             fi
             

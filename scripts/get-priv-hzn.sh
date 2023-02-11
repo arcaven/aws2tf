@@ -1,48 +1,42 @@
 #!/bin/bash
 if [ "$1" != "" ]; then
-    arn=`echo $1`
-    arn="arn:aws:servicediscovery:eu-west-1:566972129213:service/srv-pdhsivbua7ukgz6i"
-    comm=`printf "$AWS servicediscovery list-services | jq '.Services[] | select(.Arn==\"%s\").Id' | tr -d '\"'" $arn`
-    srvid=`eval $comm`
-    nsid=`$AWS servicediscovery get-service --id $srvid | jq .Service.NamespaceId | tr -d '\"'`
-    echo $nsid
+    hzid=$(echo $1)
+    #arn=`echo $1`
+    #arn="arn:aws:servicediscovery:eu-west-1:566972129213:service/srv-pdhsivbua7ukgz6i"
+    #comm=`printf "$AWS servicediscovery list-services | jq '.Services[] | select(.Arn==\"%s\").Id' | tr -d '\"'" $arn`
+    #srvid=`eval $comm`
+    #nsid=`$AWS servicediscovery get-service --id $srvid | jq .Service.NamespaceId | tr -d '\"'`
+    #echo $nsid
     # get zone id
-    hzid=`$AWS servicediscovery get-namespace --id $nsid | jq .Namespace.Properties.DnsProperties.HostedZoneId | tr -d '"'`
+    #hzid=`$AWS servicediscovery get-namespace --id $nsid | jq .Namespace.Properties.DnsProperties.HostedZoneId | tr -d '"'`
     echo $hzid
     cmd[0]="$AWS route53 list-resource-record-sets --hosted-zone-id $hzid" 
 else
-    echo "Must provide a service Arn - exiting ..."
+    echo "Must provide a hosted zone id - exiting ..."
     exit
 fi
 
-ttft="aws_route53_zone"
-
+c=0
+tft[0]="aws_route53_zone"
+ttft=${tft[(${c})]}
 
 #rm -f ${tft[0]}.tf
-
-
-            cname=`echo $hzid`
+cname=`echo $hzid`
             
-            rname=${cname//:/_}
-            rname=${rname//\//_}
-            echo "getting hostzone $rname"
-            fn=`printf "%s__%s.tf" $ttft $rname`
-            printf "resource \"%s\" \"%s\" {\n" $ttft $rname > $fn
-            printf "}"  >> $fn
-            
-            terraform import $ttft.$rname $rname | grep Import
-            terraform state show $ttft.$rname > t2.txt
-            
-            rm $fn
 
-            tfa=`printf "data/%s.%s" $ttft $rname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
-            #echo $awsj | jq . 
-           
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+echo "getting hostzone hzid=$cname"
+rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
+fn=`printf "%s__%s.tf" $ttft $rname`
+if [ -f "$fn" ] ; then echo "$fn exists already skipping" && exit; fi
+
+printf "resource \"%s\" \"%s\" {\n" $ttft $rname > $fn
+printf "}"  >> $fn
+            
+terraform import $ttft.$rname "${cname}" | grep Import
+terraform state show -no-color $ttft.$rname > t1.txt
+            
+rm -f $fn
+
             file="t1.txt"
             echo $aws2tfmess > $fn
             while IFS= read line
@@ -62,7 +56,7 @@ ttft="aws_route53_zone"
                     if [[ ${tt1} == "availability_zone_id" ]];then skip=1;fi
                     if [[ ${tt1} == "state" ]];then skip=1;fi
                     if [[ ${tt1} == "dns_entry" ]];then skip=1;fi
-
+                    if [[ ${tt1} == "zone_id" ]];then skip=1;fi
                     if [[ ${tt1} == "requester_managed" ]];then skip=1;fi
                     if [[ ${tt1} == "revision" ]];then skip=1;fi
                     if [[ ${tt1} == "cidr_blocks" ]];then
@@ -74,10 +68,29 @@ ttft="aws_route53_zone"
                             echo $t1
                         done
                     fi
+                    if [[ ${tt1} == "name_servers" ]];then 
+                        #echo $t1
+                        skip=1
+                        lbc=0
+                        rbc=0
+                        breq=0
+                        while [[ $breq -eq 0 ]];do 
+                            if [[ "${t1}" == *"["* ]]; then lbc=`expr $lbc + 1`; fi
+                            if [[ "${t1}" == *"]"* ]]; then rbc=`expr $rbc + 1`; fi
+
+                            if [[ $rbc -eq $lbc ]]; then 
+                                breq=1; 
+                            else
+                                read line
+                                t1=`echo "$line"`
+                            fi
+                        done 
+                    fi
+
                     if [[ ${tt1} == "network_interface_ids" ]];then skip=1;fi
                     if [[ ${tt1} == "vpc_id" ]]; then
-                        tt2=`echo $tt2 | tr -d '"'`
-                        t1=`printf "%s = aws_vpc.%s.id" $tt1 $tt2`
+                        vpcid=`echo $tt2 | tr -d '"'`
+                        t1=`printf "%s = aws_vpc.%s.id" $tt1 $vpcid`
                     fi
                
                 fi
@@ -87,15 +100,13 @@ ttft="aws_route53_zone"
                 fi
                 
             done <"$file"
+            if [[ "$vpcid" != "" ]];then
+                 ../../scripts/100-get-vpc.sh $vpcid
+            fi
             
 
 rm t*.txt
-#$AWS route53 get-hosted-zone --id Z0956511MQ670ZMC5AV9
-# get vpc-id from above
-# resource "aws_service_discovery_private_dns_namespace" "example" {
-# name from   $AWS servicediscovery get-namespace --id $nsid
-# vpc =
-# }  
+
 
 
 

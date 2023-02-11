@@ -19,7 +19,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     if [ "$1" != "" ]; then
@@ -34,7 +34,7 @@ for c in `seq 0 0`; do
             if [ "$1" != "" ]; then
                 cname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}")
             else
-                cname=$(echo $awsout | jq -r ".${pref[(${c})]}[]")
+                cname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})]")
             fi
             echo "$ttft $cname"
             rname=`printf "c9_%s" $cname`
@@ -44,18 +44,15 @@ for c in `seq 0 0`; do
                 continue
             fi
             printf "resource \"%s\" \"%s\" {" $ttft $rname > $ttft.$rname.tf
-            printf "}" $cname >> $ttft.$rname.tf
+            printf "}" >> $ttft.$rname.tf
             printf "terraform import %s.%s %s" $ttft $rname $cname > data/import_$ttft_$rname.sh
             terraform import $ttft.$rname "$cname" | grep Import
-            terraform state show $ttft.$rname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $rname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$rname > t1.txt
+            tfa=`printf "%s.%s" $ttft $rname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
             rm $ttft.$rname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+
             file="t1.txt"
             echo $aws2tfmess > $fn
             sgs=()
@@ -135,7 +132,6 @@ for c in `seq 0 0`; do
             done
 
             for sg in ${sgs[@]}; do
-                #echo "therole=$therole"
                 sg1=`echo $sg | tr -d '"'`
                 echo "calling for $sg1"
                 if [ "$sg1" != "" ]; then

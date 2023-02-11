@@ -1,20 +1,22 @@
 #!/bin/bash
 if [ "$1" != "" ]; then
-    cmd[0]="$AWS elbv2 describe-target-groups --load-balancer-arn \"$1\""
+    if [[ "$1" == *":targetgroup"* ]];then
+        cmd[0]="$AWS elbv2 describe-target-groups --target-group-arn \"$1\""
+    else
+        cmd[0]="$AWS elbv2 describe-target-groups --load-balancer-arn \"$1\""
+    fi 
+
 else
-    echo "must pass lb arn"
+    echo "must pass tgt group or lb arn"
     exit
 fi
-
 
 c=0
 cm=${cmd[$c]}
 
 pref[0]="TargetGroups"
 tft[0]="aws_lb_target_group"
-
 idfilt[0]="TargetGroupArn"
-rm -f ${tft[(${c})]}.*.tf
 
 for c in `seq 0 0`; do
  
@@ -23,7 +25,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -33,23 +35,21 @@ for c in `seq 0 0`; do
             #echo $i
             cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}" | tr -d '"'`
             echo "$ttft $cname"
-            rname=${cname//:/_}
-            rname=${rname//\//_}
-            echo $rname
+            rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
+            fn=`printf "%s__%s.tf" $ttft $rname`
+            #echo $fn
+            if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
+
             fn=`printf "%s__%s.tf" $ttft $rname`
             
-
             printf "resource \"%s\" \"%s\" {\n" $ttft $rname > $fn
             printf "}"  >> $fn
             
             terraform import $ttft.$rname "$cname" | grep Import
-            terraform state show $ttft.$rname > t2.txt
+            terraform state show -no-color $ttft.$rname > t1.txt
             
-            rm $fn
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $fn
+
             file="t1.txt"
             
          
@@ -88,16 +88,10 @@ for c in `seq 0 0`; do
                         t1=`printf "%s = aws_subnet.%s.id" $tt1 $tt2`
                     fi
                     if [[ ${tt1} == "vpc_id" ]]; then
-                        tt2=`echo $tt2 | tr -d '"'`
-                        t1=`printf "%s = aws_vpc.%s.id" $tt1 $tt2`
+                        vpcid=`echo $tt2 | tr -d '"'`
+                        t1=`printf "%s = aws_vpc.%s.id" $tt1 $vpcid`
                     fi
 
-
-                #else
-                #    if [[ "$t1" == *"sg-"* ]]; then
-                #        t1=`echo $t1 | tr -d '"|,'`
-                #        t1=`printf "aws_security_group.%s.id," $t1`
-                #    fi
                 fi
                 
                 if [ "$skip" == "0" ]; then
@@ -106,7 +100,10 @@ for c in `seq 0 0`; do
                 fi
                 
             done <"$file"
-            
+
+            if [[ "${vpcid}" != "" ]]; then
+                ../../scripts/100-get-vpc.sh $vpcid
+            fi
         done
     fi
 done

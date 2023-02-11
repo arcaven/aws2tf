@@ -12,7 +12,8 @@ c=0
 pref[0]="SecurityGroups"
 tft[0]="aws_security_group"
 idfilt[0]="GroupId"
-
+ncpu=$(getconf _NPROCESSORS_ONLN)
+ncpu=`expr $ncpu - 1`
 for c in `seq 0 0`; do
     
     cm=${cmd[$c]}
@@ -20,7 +21,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -34,12 +35,21 @@ for c in `seq 0 0`; do
             fn=`printf "%s__%s.tf" $ttft $rname`
             if [ -f "$fn" ]; then continue; fi
             #echo "calling import sub"
-            . ../../scripts/parallel_import.sh $ttft $cname &
+            . ../../scripts/parallel_import2.sh $ttft $cname &
+            jc=`jobs -r | wc -l | tr -d ' '`
+            while [ $jc -gt $ncpu ];do
+                echo "Throttling - $jc Terraform imports in progress"
+                sleep 10
+                jc=`jobs -r | wc -l | tr -d ' '`
+            done
         done
+
         jc=`jobs -r | wc -l | tr -d ' '`
         echo "Waiting for $jc Terraform imports"
         wait
         echo "Finished importing"
+        ../../scripts/parallel_statemv.sh $ttft
+
         # tf files
         for i in `seq 0 $count`; do
             #echo $i

@@ -1,6 +1,7 @@
 #!/bin/bash
 if [ "$1" != "" ]; then
-    cmd[0]="$AWS secretsmanager list-secrets" 
+    # should be an arn
+    cmd[0]="$AWS secretsmanager describe-secret --secret-id $1" 
 else
     cmd[0]="$AWS secretsmanager list-secrets"
 fi
@@ -18,15 +19,23 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
-    count=`echo $awsout | jq ".${pref[(${c})]} | length"`
+    if [ "$1" != "" ]; then
+        count=1
+    else
+        count=`echo $awsout | jq ".${pref[(${c})]} | length"`
+    fi
     if [ "$count" -gt "0" ]; then
         count=`expr $count - 1`
         for i in `seq 0 $count`; do
-            #echo $i
-            cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}" | tr -d '"'`
+            echo $i
+            if [[ $1 != "" ]];then
+                cname=$(echo $1)
+            else
+                cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}" | tr -d '"'`
+            fi
             rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
             echo "$ttft $cname import"
             fn=`printf "%s__%s.tf" $ttft $rname`
@@ -35,16 +44,14 @@ for c in `seq 0 0`; do
                 echo "$fn exists already skipping"
                 continue
             fi
-            printf "resource \"%s\" \"%s\" {" $ttft $rname > $ttft.$rname.tf
-            printf "}"  >> $ttft.$rname.tf
-            printf "terraform import %s.%s %s" $ttft $rname "$cname" > data/import_$ttft_$rname.sh
+            printf "resource \"%s\" \"%s\" {}" $ttft $rname > $fn
             terraform import $ttft.$rname "$cname" | grep Import
-            terraform state show $ttft.$rname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $rname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$rname > t1.txt
+            tfa=`printf "%s.%s" $ttft $rname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
-            rm $ttft.$rname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
+            rm -f $fn
+            
             #	for k in `cat t1.txt`; do
             #		echo $k
             #	done
@@ -91,6 +98,7 @@ for c in `seq 0 0`; do
             done <"$file"
 
             ../../scripts/get-secret-version.sh $cname
+            #../../scripts/get-secret-rotation.sh $cname
 
         done
 

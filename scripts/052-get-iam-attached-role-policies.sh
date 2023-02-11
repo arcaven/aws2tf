@@ -17,7 +17,7 @@ for c in `seq 0 0`; do
     #echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     #echo "awsout $awsout"
@@ -31,9 +31,7 @@ for c in `seq 0 0`; do
         count=`expr $count - 1`
         for i in `seq 0 $count`; do
             #echo $i
-            #echo $awsout | jq .
-            
-            
+            #echo $awsout | jq .          
             
             cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].PolicyName" | tr -d '"'`
             rarn=`echo $awsout | jq ".${pref[(${c})]}[(${i})].PolicyArn" | tr -d '"'`
@@ -55,19 +53,16 @@ for c in `seq 0 0`; do
             
             terraform import $ttft.$rname $1/$rarn | grep Import
             #terraform import $ttft.$rname "$cname" | grep Import
-            terraform state show $ttft.$rname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $rname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$rname > t1.txt
+            tfa=`printf "%s.%s" $ttft $rname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
             rm $ttft.$rname.tf
             
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
             file="t1.txt"
             pnam=""
             echo $aws2tfmess > $fn
+            echo "# $0" >> $fn
             while IFS= read line
             do
                 skip=0
@@ -78,6 +73,7 @@ for c in `seq 0 0`; do
                     tt1=`echo "$line" | cut -f1 -d'=' | tr -d ' '`
                     tt2=`echo "$line" | cut -f2- -d'='`
                     if [[ ${tt1} == *":"* ]];then
+                        tt1=`echo $tt1 | tr -d '"'`
                         t1=`printf "\"%s\"=%s" $tt1 $tt2`
                     fi
                     if [[ ${tt1} == "role" ]];then 
@@ -93,8 +89,19 @@ for c in `seq 0 0`; do
                             parn=`echo $tt2 | tr -d '"'`
                             #echo "parn=$parn"
                             #echo "pnam=$pnam"
-            
-                            t1=`printf "%s = aws_iam_policy.%s.arn" $tt1 $pnam`
+
+                        fi
+                        if [[ "${tt2}" == *":policy/"* ]]; then
+                            pnam=`echo $tt2 | rev | cut -f1 -d'/' | rev | tr -d '"'`
+                            parn=`echo $tt2 | tr -d '"'`
+                            #echo "parn=$parn"
+                            #echo "pnam=$pnam"
+                            if [[ "$parn" == *":aws:policy"* ]];then
+                                t1=`printf "%s = \"%s\"" $tt1 $parn`
+                            else
+                                t1=`printf "%s = aws_iam_policy.%s.arn" $tt1 $pnam`
+                            fi
+
                         fi
                         skip=0;
                     fi

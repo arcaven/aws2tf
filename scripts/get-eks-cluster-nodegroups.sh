@@ -42,7 +42,7 @@ if [ "$kcount" -gt "0" ]; then
                     #echo "inner command=$cm"
                     awsout=`eval $cm 2> /dev/null`
                     if [ "$awsout" == "" ];then
-                        echo "You don't have access for this resource"
+                        echo "$cm : You don't have access for this resource"
                         exit
                     fi
                     #echo awsout
@@ -61,21 +61,21 @@ if [ "$kcount" -gt "0" ]; then
                            
                             #echo "cname=$cname ngname=$ngnam ocname=$ocname"
                             fn=`printf "%s__%s.tf" $ttft $cname`
+                            echo "$ttft $cname import"
+                            if [ -f "$fn" ]; then continue; fi
 
-                            printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-                            printf "}" >> $ttft.$cname.tf
+                            printf "resource \"%s\" \"%s\" {}\n" $ttft $cname > $fn
+                
                             #echo "pre-import"
                             #ls -l
                             echo "Importing ....."
                             terraform import $ttft.$cname $ocname | grep Import
-                            terraform state show $ttft.$cname > t2.txt
-                            rm $ttft.$cname.tf
-                            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
+                            terraform state show -no-color $ttft.$cname > t1.txt
+                            rm -f $fn
+            
                             mv="version"
                             file="t1.txt"
                             
-                            fn=`printf "%s__%s.tf" $ttft $cname`
-                
                             echo $aws2tfmess > $fn
                             iscust=0
                             allowid=0
@@ -90,6 +90,7 @@ if [ "$kcount" -gt "0" ]; then
                                     tt1=`echo "$line" | cut -f1 -d'=' | tr -d ' '`
                                     tt2=`echo "$line" | cut -f2- -d'='`
                                     if [[ ${tt1} == *":"* ]];then
+                                        tt1=`echo $tt1 | tr -d '"'`
                                         t1=`printf "\"%s\"=%s" $tt1 $tt2`
                                     fi
                                     if [[ ${tt1} == "arn" ]];then 
@@ -139,6 +140,21 @@ if [ "$kcount" -gt "0" ]; then
                                         #fi
                                     fi
 
+                                    if [[ ${tt1} == "max_unavailable_percentage" ]];then 
+                                        tt2=`echo $tt2 | tr -d ' '`
+                                        if [ "$tt2" == "0" ]; then
+                                            skip=1;
+                                        fi
+                                    fi
+
+
+                                    if [[ ${tt1} == "max_unavailable" ]];then 
+                                        tt2=`echo $tt2 | tr -d ' '`
+                                        if [ "$tt2" == "0" ]; then
+                                            skip=1;
+                                        fi
+                                    fi
+
                                     if [[ ${tt1} == "resources" ]];then 
                                         #echo $t1
                                         skip=1
@@ -172,9 +188,9 @@ if [ "$kcount" -gt "0" ]; then
                                 fi
                                 
                             done <"$file"   # done while
-          
-                            ../../scripts/050-get-iam-roles.sh $rarn
-            
+                            if [[ $rarn != "" ]];then
+                                ../../scripts/050-get-iam-roles.sh $rarn
+                            fi
                             # pick up the launch template here
                             ltid=`echo $awsout | jq .nodegroup.launchTemplate.id | tr -d '"'`
                             echo "ltid=$ltid calling eks-launch_template.sh "

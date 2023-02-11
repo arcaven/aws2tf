@@ -12,6 +12,8 @@ c=0
 pref[0]="SecurityGroups"
 tft[0]="aws_security_group"
 idfilt[0]="GroupId"
+ncpu=$(getconf _NPROCESSORS_ONLN)
+ncpu=`expr $ncpu - 1`
 
 for c in `seq 0 0`; do
     
@@ -20,45 +22,75 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
+    #echo "count=$count"
     if [ "$count" -gt "0" ]; then
         count=`expr $count - 1`
         for i in `seq 0 $count`; do
             #echo $i
             cname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}")
             sgname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].GroupName")
-            if [[ $sgname == "default" ]];then
-                continue
-            fi
-            rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
+            sgvpcid=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].VpcId")
             echo "$ttft $cname import"
+            rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
             fn=`printf "%s__%s.tf" $ttft $rname`
-            if [ -f "$fn" ]; then continue; fi
+            if [ -f "$fn" ] ; then  
+                if [[ "$1" == "sg-"* ]]; then
+                    echo "$fn exists already exit ..."
+                    exit
+                else
+                    echo "$fn exists already skipping ..."
+                    continue
+                fi 
+            fi
+
+
+            if [[ $sgname == "default" ]];then
+                echo "is default data..."
+                echo "${sgname}:${cname}:${sgvpcid}" >> data/def-sgs.dat
+                printf "data \"%s\" \"%s\" {\n" $ttft $rname > data-$fn
+                printf "name = \"%s\"\n" $sgname >> data-$fn
+                printf "vpc_id = aws_vpc.%s.id\n" $sgvpcid >> data-$fn
+                printf "}\n" >> data-$fn
+                
+                
+            fi
+           
             #echo "calling import sub"
-            . ../../scripts/parallel_import.sh $ttft $cname &
+            . ../../scripts/parallel_import2.sh $ttft $cname &
+            jc=`jobs -r | wc -l | tr -d ' '`
+            while [ $jc -gt $ncpu ];do
+                echo "Throttling - $jc Terraform imports in progress"
+                sleep 10
+                jc=`jobs -r | wc -l | tr -d ' '`
+            done
+        
         done
+
         jc=`jobs -r | wc -l | tr -d ' '`
         echo "Waiting for $jc Terraform imports"
         wait
         echo "Finished importing"
+        ../../scripts/parallel_statemv.sh $ttft
+
+
         # tf files
         for i in `seq 0 $count`; do
             #echo $i
             cname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}")
             sgname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].GroupName")
+            echo "$ttft $cname"
             rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
-            if [[ $sgname == "default" ]];then
-                continue
-            fi
-            echo "$ttft $cname tf files"
             fn=`printf "%s__%s.tf" $ttft $rname`
-            if [ -f "$fn" ]; then continue; fi
-
+            if [ -f "$fn" ]; then echo "$fn exists continuing .." && continue; fi
+            #if [[ $sgname == "default" ]];then echo "is default continue..." ; fi
+            
             file=`printf "%s-%s-1.txt" $ttft $rname`
             if [ ! -f "$file" ] ; then echo "$file does not exist skipping" && continue; fi
+            echo "Generating $fn"
             echo $aws2tfmess > $fn
             while IFS= read line
             do
@@ -124,21 +156,26 @@ for c in `seq 0 0`; do
                 
             done <"$file"
 
+
             if [[ "$vpcid" != "" ]]; then
                 ../../scripts/100-get-vpc.sh $vpcid
             fi
+
+        done # for i
+
+        for i in `seq 0 $count`; do
+            #echo $i
+            cname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}")
+            sgname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].GroupName")      
+
             ../../scripts/get-sg-rules.sh $cname ingress
-            ../../scripts/get-sg-rules.sh $cname egress
-
-
-            dfn=`printf "data/data_%s__%s.tf" $ttft $rname`
-            printf "data \"%s\" \"%s\" {\n" $ttft $rname > $dfn
-            printf "id = \"%s\"\n" "$cname" >> $dfn
-            printf "}\n" >> $dfn
-           
+            ../../scripts/get-sg-rules.sh $cname egress         
         done # for i
     fi
 done  # for c
+
+
+
 
 rm -f *.backup 
 

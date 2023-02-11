@@ -3,7 +3,6 @@ if [ "$1" != "" ]; then
     cmd[0]="$AWS kms list-aliases --key-id $1"  
 else
     cmd[0]="$AWS kms list-aliases"
-   
 fi
 
 pref[0]="Aliases"
@@ -12,6 +11,10 @@ idfilt[0]="AliasName"
 c=0
 #rm -f ${tft[0]}.tf
 
+if [[ "$1" == "null" ]];then
+    echo "null key alias exiting ...."
+    exit
+fi
 for c in `seq 0 0`; do
     
     cm=${cmd[$c]}
@@ -19,7 +22,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     if [ "$1" != "" ]; then
@@ -36,7 +39,13 @@ for c in `seq 0 0`; do
             rname=${cname//:/_}
             rname=${rname//./_}
             rname=${rname//\//_}
-            echo "$ttft $cname"
+            if [[ "$cname" == "null" ]];then
+                echo "null key alias continue ...."
+                continue
+            fi
+            
+            
+            #echo "$ttft $cname"
             if [[ "$cname" != *"alias/aws/"* ]];then
                 echo "$ttft $cname"
                 fn=`printf "%s__%s.tf" $ttft $rname`
@@ -46,25 +55,24 @@ for c in `seq 0 0`; do
                 fi
 
                 kmsid=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].TargetKeyId")
-                if [ "$kmsid" != "" ]; then
-                    ../../scripts/080-get-kms-key.sh $kmsid
-                fi
+                #if [ "$kmsid" != "" ]; then
+                #    ../../scripts/080-get-kms-key.sh $kmsid
+                #fi
 
-                printf "resource \"%s\" \"%s\" {" $ttft $rname > $ttft.$rname.tf
-                printf "}" >> $ttft.$rname.tf
+                printf "resource \"%s\" \"%s\" {" $ttft $rname > $fn
+                printf "}" >> $fn
+
+
                 printf "terraform import %s.%s %s" $ttft $rname "$cname" > import_$ttft_$rname.sh
                 terraform import $ttft.$rname "$cname" | grep Import
                 
-                terraform state show $ttft.$rname > t2.txt
-                tfa=`printf "data/%s.%s" $ttft $rname`
-                terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+                terraform state show -no-color $ttft.$rname > t1.txt
+                tfa=`printf "%s.%s" $ttft $rname`
+                terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
                 #echo $awsj | jq . 
-                rm $ttft.$rname.tf
+                rm -f $fn
                 # rename state to save problems later
-                cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-                #	for k in `cat t1.txt`; do
-                #		echo $k
-                #	done
+
                 file="t1.txt"
                 echo $aws2tfmess > $fn
                 while IFS= read line
@@ -101,13 +109,19 @@ for c in `seq 0 0`; do
                     fi
                     
                 done <"$file"
+
+                if [ "$kmsid" != "" ]; then
+                    ../../scripts/080-get-kms-key.sh $kmsid
+                fi
+
+
             else
                 cmd2=`printf "$AWS kms list-aliases | jq -r '.Aliases[] | select(.AliasName==\"%s\").TargetKeyId'" $cname`
                 tgtid=$(eval $cmd2)
                 desc=`$AWS kms describe-key --key-id $tgtid 2>/dev/null`
                 if [ "$desc" != "" ]; then
                     dfn=`printf "data_%s__%s.tf" $ttft $rname`
-                    echo "AWS managed key alias data $dfn"
+                    echo "AWS managed key alias data $dfn $cname"
                     printf "data \"%s\" \"%s\" {\n" $ttft $rname > $dfn
                     printf "name = \"%s\"\n" "$cname" >> $dfn
                     printf "}\n" >> $dfn

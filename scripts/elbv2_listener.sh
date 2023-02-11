@@ -1,6 +1,10 @@
 #!/bin/bash
-if [ "$1" != "" ]; then
-    cmd[0]="$AWS elbv2 describe-listeners --load-balancer-arn \"$1\""
+if [[ "$1" != "" ]]; then
+    if [[ "$1" == *"listener"* ]];then
+        cmd[0]="$AWS elbv2 describe-listeners --listener-arns \"$1\""
+    else
+        cmd[0]="$AWS elbv2 describe-listeners --load-balancer-arn \"$1\""
+    fi
 else
     echo "must pass lb arn"
     exit
@@ -11,8 +15,8 @@ cm=${cmd[$c]}
 
 pref[0]="Listeners"
 tft[0]="aws_lb_listener"
-
 idfilt[0]="ListenerArn"
+
 rm -f ${tft[(${c})]}.*.tf
 
 for c in `seq 0 0`; do
@@ -22,7 +26,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -34,23 +38,19 @@ for c in `seq 0 0`; do
             echo $i
             cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}" | tr -d '"'`
             echo "$ttft $cname"
-            rname=${cname//:/_}
-            rname=${rname//\//_}
-            echo $rname
+            rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
             fn=`printf "%s__%s.tf" $ttft $rname`
             #echo $fn
+            if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
 
             printf "resource \"%s\" \"%s\" {\n" $ttft $rname > $fn
             printf "}"  >> $fn
             
             terraform import $ttft.$rname "$cname" | grep Import
-            terraform state show $ttft.$rname > t2.txt
+            terraform state show -no-color $ttft.$rname > t1.txt
             
-            rm $fn
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $fn
+
             file="t1.txt"
             
          
@@ -90,14 +90,26 @@ for c in `seq 0 0`; do
                     if [[ ${tt1} == "subnet_id" ]]; then
                         tt2=`echo $tt2 | tr -d '"'`
                         t1=`printf "%s = aws_subnet.%s.id" $tt1 $tt2`
+                    
+                    fi
+                    if [[ ${tt1} == "target_group_arn" ]]; then
+                        tarn=`echo $tt2 | tr -d '"'`
+                        tlarn=${tarn//:/_} && tlarn=${tlarn//./_} && tlarn=${tlarn//\//_}
+                        t1=`printf "%s = aws_lb_target_group.%s.arn" $tt1 $tlarn`
                     fi
 
+                            
+                    if [[ ${tt1} == "load_balancer_arn" ]]; then
+                        lbarn=`echo $tt2 | tr -d '"'`
+                        tlbarn=${lbarn//:/_} && tlbarn=${tlbarn//./_} && tlbarn=${tlbarn//\//_}
+                        t1=`printf "%s = aws_lb.%s.arn" $tt1 $tlbarn`
+                    fi
+                else
+                    if [[ "$t1" == *"subnet-"* ]]; then
+                        t1=`echo $t1 | tr -d '"|,'`
+                        t1=`printf "aws_subnet.%s.id," $t1`
+                    fi
 
-                #else
-                #    if [[ "$t1" == *"sg-"* ]]; then
-                #        t1=`echo $t1 | tr -d '"|,'`
-                #        t1=`printf "aws_security_group.%s.id," $t1`
-                #    fi
                 fi
                 
                 if [ "$skip" == "0" ]; then
@@ -106,6 +118,14 @@ for c in `seq 0 0`; do
                 fi
                 
             done <"$file"
+            if [[ "$tarn" != "" ]]; then
+                ../../scripts/elbv2-target-groups.sh $tarn
+            fi
+            if [[ "$lbarn" != "" ]]; then
+                echo "lbarn=$lbarn"
+                ../../scripts/elbv2.sh $lbarn
+            fi
+
             
         done
     fi

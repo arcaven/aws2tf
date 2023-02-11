@@ -1,5 +1,13 @@
 #!/bin/bash
-cmd[0]="$AWS iam list-users"
+if [[ "$1" != "" ]]; then  
+    if [[ ${1} == "arn:aws:iam"* ]]; then
+        cmd[0]="$AWS iam list-users | jq '.Users[] | select(.Arn==\"${1}\")'"
+    else
+        cmd[0]="$AWS iam list-users | jq '.Users[] | select(.UserName==\"${1}\")'"
+    fi
+else
+    cmd[0]="$AWS iam list-users"
+fi
 
 pref[0]="Users"
 tft[0]="aws_iam_user"
@@ -12,7 +20,7 @@ for c in `seq 0 0`; do
     #echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     if [ "$1" != "" ]; then
@@ -26,29 +34,27 @@ for c in `seq 0 0`; do
         for i in `seq 0 $count`; do
             #echo $i
             if [ "$1" != "" ]; then
-                cname=`echo $awsout | jq ".UserName" | tr -d '"'` 
+                cname=`echo $awsout | jq -r ".UserName"` 
             else
-                cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].UserName" | tr -d '"'`
+                cname=`echo $awsout | jq -r ".${pref[(${c})]}[(${i})].UserName"`
             fi
             ocname=`echo $cname`
             cname=${cname//./_}
+            rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
             echo "$ttft $cname"
-            fn=`printf "%s__%s.tf" $ttft $cname`
+            fn=`printf "%s__%s.tf" $ttft $rname`
             if [ -f "$fn" ] ; then
                 echo "$fn exists already skipping"
-                exit
+                continue
             fi
 
 
-            printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" >> $ttft.$cname.tf
-            terraform import $ttft.$cname $ocname | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            printf "resource \"%s\" \"%s\" {}" $ttft $cname > $fn
+     
+            terraform import $ttft.$rname $ocname | grep Import
+            terraform state show -no-color $ttft.$rname > t1.txt
+            rm -f $fn
+
             file="t1.txt"
 
             echo $aws2tfmess > $fn
@@ -61,6 +67,7 @@ for c in `seq 0 0`; do
                     tt1=`echo "$line" | cut -f1 -d'=' | tr -d ' '`
                     tt2=`echo "$line" | cut -f2- -d'='`
                     if [[ ${tt1} == *":"* ]];then
+                        tt1=`echo $tt1 | tr -d '"'`
                         t1=`printf "\"%s\"=%s" $tt1 $tt2`
                     fi
                     if [[ ${tt1} == "arn" ]];then skip=1; fi

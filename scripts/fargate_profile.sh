@@ -18,7 +18,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -34,9 +34,8 @@ for c in `seq 0 0`; do
             printf "}" $cname >> $of
             echo "$ttft.$cname $ren"
             terraform import $ttft.$cname $ren | grep Import
-            terraform state show $ttft.$cname > t2.txt
+            terraform state show -no-color $ttft.$cname > t1.txt
             rm -f $of
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
     
             file="t1.txt"
             fn=`printf "%s__%s__%s.tf" $ttft $cln $cname`

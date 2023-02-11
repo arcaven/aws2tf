@@ -18,7 +18,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -40,17 +40,15 @@ for c in `seq 0 0`; do
             printf "}" $cname >> $fn
             printf "terraform import %s.%s %s" $ttft $rname $cname > import_$ttft_$rname.sh
             terraform import $ttft.$rname $cname | grep Import
-            terraform state show $ttft.$rname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $rname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$rname > t1.txt
+            tfa=`printf "%s.%s" $ttft $rname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
-            rm $ttft.$rname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $ttft.$rname.tf
+ 
             file="t1.txt"
             echo $aws2tfmess > $fn
+            keyid=""
             while IFS= read line
             do
 				skip=0
@@ -71,6 +69,18 @@ for c in `seq 0 0`; do
                         tt2=`echo $tt2 | tr -d '"'`
                         t1=`printf "%s = aws_vpc.%s.id" $tt1 $tt2`
                     fi
+
+                    if [[ ${tt1} == "kms_key" ]]; then
+                        keyid=`echo $tt2 | rev | cut -f1 -d'/' | rev | tr -d '"'`
+                        kt=$($AWS kms describe-key --key-id $keyid --query KeyMetadata.KeyManager | jq -r .)
+                        if [[ "$kt" == "AWS" ]];then
+                            # AWS default managed key
+                            skip=1
+                        else
+                            t1=`printf "%s = aws_kms_key.k_%s.arn" $tt1 $keyid`
+                        fi
+                    fi
+
                
                 fi
                 if [ "$skip" == "0" ]; then
@@ -79,6 +89,10 @@ for c in `seq 0 0`; do
                 fi
                 
             done <"$file"
+
+            if [[ "$keyid" != "" ]];then
+                ../../scripts/080-get-kms-key.sh $keyid
+            fi 
 
             ofn=`printf "output__%s__%s.tf" $ttft $rname`
             printf "output \"%s__%s__id\" {\n" $ttft $rname > $ofn

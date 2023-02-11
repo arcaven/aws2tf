@@ -15,7 +15,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -30,24 +30,19 @@ for c in `seq 0 0`; do
             rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
          
             fn=`printf "%s__%s.tf" $ttft $rname`
-            if [ -f "$fn" ] ; then continue; fi
+            if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
 
             echo "$ttft $cname import"
 
 
             printf "resource \"%s\" \"%s\" {" $ttft $upn > $fn
-            printf "}" $cname >> $fn
+            printf "}"  >> $fn
             terraform import $ttft.$upn "$cname" | grep Import
-            terraform state show $ttft.$upn > t2.txt
-            rm $ttft.$rname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            terraform state show -no-color $ttft.$upn > t1.txt
+            rm -f $fn
+
             file="t1.txt"
  
-
-
             echo $aws2tfmess > $fn
 
             while IFS= read line
@@ -60,10 +55,14 @@ for c in `seq 0 0`; do
                     tt2=`echo "$line" | cut -f2- -d'='`
                     if [[ ${tt1} == "arn" ]];then skip=1; fi                
                     if [[ ${tt1} == "id" ]];then skip=1; fi          
-                    if [[ ${tt1} == "role_arn" ]];then skip=1;fi
-                    if [[ ${tt1} == "home_efs_file_system_id" ]];then skip=1;fi
-                    if [[ ${tt1} == "home_efs_file_system_uid" ]];then skip=1;fi
+                    if [[ ${tt1} == "role_arn" ]];then skip=1;fi   
                     if [[ ${tt1} == "url" ]];then skip=1;fi
+                    if [[ ${tt1} == "home_efs_file_system_uid" ]];then skip=1;fi
+                    if [[ ${tt1} == "domain_id" ]];then 
+                                skip=0;
+                                did=`echo "$tt2" | cut -f2- -d'/' | tr -d '"'`          
+                                t1=`printf "domain_id = aws_sagemaker_domain.%s.id" $did`
+                    fi
                     if [[ ${tt1} == "single_sign_on_managed_application_instance_id" ]];then skip=1;fi
                 fi
                 if [ "$skip" == "0" ]; then
@@ -72,8 +71,7 @@ for c in `seq 0 0`; do
                 fi
                 
             done <"$file"
-   
-
+            ../../scripts/get-sagemaker-app.sh $domid $upn
             
         done
     fi

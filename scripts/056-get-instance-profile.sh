@@ -10,7 +10,8 @@ fi
 
 tft[0]="aws_iam_instance_profile"
 idfilt[0]="InstanceProfileName"
-
+ncpu=$(getconf _NPROCESSORS_ONLN)
+ncpu=`expr $ncpu - 1`
 #rm -f ${tft[0]}.tf
 
 for c in `seq 0 0`; do
@@ -21,7 +22,7 @@ for c in `seq 0 0`; do
 
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
 
@@ -45,12 +46,21 @@ for c in `seq 0 0`; do
             fn=`printf "%s__%s.tf" $ttft $rname`
             if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
             #echo "calling import sub"
-            . ../../scripts/parallel_import.sh $ttft $cname &
+            . ../../scripts/parallel_import2.sh $ttft $cname &
+            jc=`jobs -r | wc -l | tr -d ' '`
+            while [ $jc -gt $ncpu ];do
+                echo "Throttling - $jc Terraform imports in progress"
+                sleep 10
+                jc=`jobs -r | wc -l | tr -d ' '`
+            done   
+        
         done
+        
         jc=`jobs -r | wc -l | tr -d ' '`
         echo "Waiting for $jc Terraform imports"
         wait
         echo "Finished importing"
+        ../../scripts/parallel_statemv.sh $ttft
 
         for i in `seq 0 $count`; do
             #echo $i
@@ -81,8 +91,8 @@ for c in `seq 0 0`; do
                     if [[ ${tt1} == "id" ]];then skip=1; fi          
                     if [[ ${tt1} == "role_arn" ]];then skip=1;fi
                     if [[ ${tt1} == "role" ]];then 
-                        tt2=`echo $tt2 | tr -d '"'`
-                        t1=`printf "%s = aws_iam_role.%s.name" $tt1 $tt2`
+                        rarn2=`echo $tt2 | tr -d '"'`
+                        t1=`printf "%s = aws_iam_role.%s.name" $tt1 $rarn2`
                     fi
                     if [[ ${tt1} == "owner_id" ]];then skip=1;fi
                     if [[ ${tt1} == "unique_id" ]];then skip=1;fi
@@ -100,8 +110,13 @@ for c in `seq 0 0`; do
                 fi
                 
             done <"$file"
-            echo "role  $rarn"
-            ../../scripts/050-get-iam-roles.sh $rarn
+            #echo "role  $rarn"
+            if [[ $rarn != "" ]];then
+                ../../scripts/050-get-iam-roles.sh $rarn
+            fi
+            if [[ $rarn2 != "" ]];then
+                ../../scripts/050-get-iam-roles.sh $rarn2
+            fi
             
         done
    

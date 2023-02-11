@@ -1,4 +1,3 @@
-ttft="aws_s3_bucket_policy"
 acct=`$AWS sts get-caller-identity | jq .Account | tr -d '"'`
 cmd[0]="$AWS s3control list-access-points --account-id $acct"
 
@@ -15,7 +14,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -26,19 +25,22 @@ for c in `seq 0 0`; do
             cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}" | tr -d '"'`
             echo "$ttft $cname"
             fn=`printf "%s__%s.tf" $ttft $cname`
+            if [ -f "$fn" ] ; then
+                    echo "$fn exists already skipping"
+                    continue
+                fi
+
             printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
+            printf "}" >> $ttft.$cname.tf
             terraform import $ttft.$cname $acct:$cname | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $cname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$cname > t1.txt
+            tfa=`printf "%s.%s" $ttft $cname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $ttft.$cname.tf
+        
             file="t1.txt"
+            vpcid=""
             echo $aws2tfmess > $fn
             while IFS= read line
             do
@@ -51,14 +53,29 @@ for c in `seq 0 0`; do
                     if [[ ${tt1} == "arn" ]];then skip=1; fi                
                     if [[ ${tt1} == "id" ]];then skip=1; fi          
                     if [[ ${tt1} == "role_arn" ]];then skip=1;fi
+                    if [[ ${tt1} == "alias" ]];then skip=1;fi
                     if [[ ${tt1} == "network_origin" ]];then skip=1;fi
                     if [[ ${tt1} == "domain_name" ]];then skip=1;fi
                     #if [[ ${tt1} == "availability_zone" ]];then skip=1;fi
                     if [[ ${tt1} == "has_public_access_policy" ]];then skip=1;fi
                     if [[ ${tt1} == "vpc_id" ]]; then
-                        tt2=`echo $tt2 | tr -d '"'`
-                        t1=`printf "%s = aws_vpc.%s.id" $tt1 $tt2`
+                        vpcid=`echo $tt2 | tr -d '"'`
+                        t1=`printf "%s = aws_vpc.%s.id" $tt1 $vpcid`
                     fi
+                    # skip endpoints block
+                    if [[ ${tt1} == "endpoints" ]];then
+                        #echo "dns block" 
+                        tt2=`echo $tt2 | tr -d '"'` 
+                        skip=1
+                        while [ "$t1" != "}" ] && [ "$tt2" != "{}" ] ;do
+                            read line
+                            t1=`echo "$line"`
+                            #echo $t1
+                        done
+                    fi
+
+
+
                
                 fi
                 if [ "$skip" == "0" ]; then
@@ -67,6 +84,10 @@ for c in `seq 0 0`; do
                 fi
                 
             done <"$file"
+
+            if [ "$vpcid" != "" ]; then
+                ../../scripts/100-get-vpc.sh $vpcid
+            fi
             
         done
     fi

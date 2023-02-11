@@ -62,15 +62,12 @@ for root in ${roots[@]}; do
             printf "}"  >> $ttft.$rname.tf
             printf "terraform import %s.%s %s" $ttft $rname "$cname" > data/import_$ttft_$rname.sh
             terraform import $ttft.$rname "$cname" | grep Import
-            terraform state show $ttft.$rname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $rname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$rname > t1.txt
+            tfa=`printf "%s.%s" $ttft $rname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
-            rm $ttft.$rname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $ttft.$rname.tf
+
             file="t1.txt"
             iddo=0
             echo $aws2tfmess > $fn
@@ -88,6 +85,7 @@ for root in ${roots[@]}; do
                     if [[ ${tt1} == "arn" ]];then skip=1; fi                
                     if [[ ${tt1} == "id" ]];then skip=1; fi
                     if [[ ${tt1} == *":"* ]];then 
+                        tt1=`echo $tt1 | tr -d '"'`
                         t1=`printf "\"%s\"=%s" $tt1 "$tt2"`
                     fi
                     if [[ ${tt1} == *"@@"* ]];then

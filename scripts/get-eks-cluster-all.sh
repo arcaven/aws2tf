@@ -13,7 +13,7 @@ if [ "$kcount" -gt "0" ]; then
         cm=${cmd[$c]}
         awsout=`eval $cm 2> /dev/null`
         if [ "$awsout" == "" ];then
-            echo "You don't have access for this resource"
+            echo "$cm : You don't have access for this resource"
             exit
         fi
         
@@ -21,19 +21,21 @@ if [ "$kcount" -gt "0" ]; then
             echo "get other stuff"
             tcmd=`echo $awsout | jq ".${pref[(${c})]}.resourcesVpcConfig.vpcId" | tr -d '"'`
             ../../scripts/100-get-vpc.sh $tcmd
-            ../../scripts/102-get-subnet.sh $tcmd
+            ../../scripts/105-get-subnet.sh $tcmd
             #
-            ../../scripts/130-get-igw.sh $tcmd
+            ../../scripts/120-get-igw.sh $tcmd
             #
-            ../../scripts/120-get-route-table.sh $tcmd
-            ../../scripts/121-get-route-table-associations.sh $tcmd
+            ../../scripts/140-get-route-table.sh $tcmd
+            ../../scripts/141-get-route-table-associations.sh $tcmd
             #
-            ../../scripts/140-get-natgw.sh $tcmd
+            ../../scripts/130-get-natgw.sh $tcmd
             #../../scripts/115-get-security_group.sh $tcmd
 
             rarn=`echo $awsout | jq ".${pref[(${c})]}.roleArn" | tr -d '"'`
             echo $rarn
-            ../../scripts/050-get-iam-roles.sh $rarn
+            if [[ $rarn != "" ]];then
+                ../../scripts/050-get-iam-roles.sh $rarn
+            fi
             csg=`echo $awsout | jq ".${pref[(${c})]}.resourcesVpcConfig.clusterSecurityGroupId" | tr -d '"'`
             ../../scripts/103-get-security_group.sh $csg
 
@@ -55,7 +57,7 @@ if [ "$kcount" -gt "0" ]; then
             #echo $cm
             awsout=`eval $cm 2> /dev/null`
             if [ "$awsout" == "" ];then
-                echo "You don't have access for this resource"
+                echo "$cm : You don't have access for this resource"
                 exit
             fi
             count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -105,12 +107,9 @@ if [ "$kcount" -gt "0" ]; then
                     printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
                     printf "}" >> $ttft.$cname.tf
                     terraform import $ttft.$cname $ocname | grep Import
-                    terraform state show $ttft.$cname > t2.txt
-                    rm $ttft.$cname.tf
-                    cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-                    #	for k in `cat t1.txt`; do
-                    #		echo $k
-                    #	done
+                    terraform state show -no-color $ttft.$cname > t1.txt
+                    rm -f $ttft.$cname.tf
+
                     file="t1.txt"
                     fn=`printf "%s__%s.tf" $ttft $cname`
                     while IFS= read line
@@ -122,6 +121,7 @@ if [ "$kcount" -gt "0" ]; then
                             tt1=`echo "$line" | cut -f1 -d'=' | tr -d ' '`
                             tt2=`echo "$line" | cut -f2- -d'='`
                             if [[ ${tt1} == *":"* ]];then
+                                tt1=`echo $tt1 | tr -d '"'`
                                 t1=`printf "\"%s\"=%s" $tt1 $tt2`
                             fi
                             if [[ ${tt1} == "arn" ]];then skip=1; fi

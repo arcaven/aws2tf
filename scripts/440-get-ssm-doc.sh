@@ -1,7 +1,7 @@
 #!/bin/bash
 if [ "$1" != "" ]; then
-    cmd[0]="$AWS ssm list-documents --filters \"Key=Owner,Values=Self\""
-    pref[0]="environments"
+    cmd[0]=$(printf "$AWS ssm list-documents --filters \"Key=Owner,Values=Self\" | jq '.DocumentIdentifiers[] | select(.Name==\"%s\")'" $1)
+    pref[0]="DocumentIdentifiers"
 else
     cmd[0]="$AWS ssm list-documents --filters \"Key=Owner,Values=Self\""
     pref[0]="DocumentIdentifiers"
@@ -16,10 +16,10 @@ for c in `seq 0 0`; do
     
     cm=${cmd[$c]}
 	ttft=${tft[(${c})]}
-	#echo $cm
+	echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     #echo $awsout | jq .
@@ -33,31 +33,28 @@ for c in `seq 0 0`; do
         for i in `seq 0 $count`; do
             #echo $i
             if [ "$1" != "" ]; then
-                cname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}")
+                cname=$(echo $awsout | jq -r ".${idfilt[(${c})]}")
             else
                 cname=$(echo $awsout | jq -r ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}")
             fi
             echo "$ttft $cname"
-            rname=`printf "%s" $cname`
-            $AWS ssm get-document --name $rname > $rname.json
+            rnamec=`printf "%s" $cname`
+            rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
+            $AWS ssm get-document --name $rnamec > $rname.json
             fn=`printf "%s__%s.tf" $ttft $rname`
             if [ -f "$fn" ] ; then
                 echo "$fn exists already skipping"
                 continue
             fi
-            printf "resource \"%s\" \"%s\" {" $ttft $rname > $ttft.$rname.tf
-            printf "}" $cname >> $ttft.$rname.tf
+            printf "resource \"%s\" \"%s\" {}" $ttft $rname > $fn
             printf "terraform import %s.%s %s" $ttft $rname $cname > data/import_$ttft_$rname.sh
             terraform import $ttft.$rname "$cname" | grep Import
-            terraform state show $ttft.$rname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $rname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$rname > t1.txt
+            tfa=`printf "%s.%s" $ttft $rname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
-            rm $ttft.$rname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $fn
+
             file="t1.txt"
             echo $aws2tfmess > $fn
             sgs=()
@@ -81,6 +78,7 @@ for c in `seq 0 0`; do
                     if [[ ${tt1} == "schema_version" ]];then skip=1;fi
                     if [[ ${tt1} == "hash" ]];then skip=1;fi
                     if [[ ${tt1} == "hash_type" ]];then skip=1;fi
+                    if [[ ${tt1} == "created_date" ]];then skip=1;fi
                     if [[ ${tt1} == "document_version" ]];then skip=1;fi
                     if [[ ${tt1} == "default_version" ]];then skip=1;fi
                     if [[ ${tt1} == "description" ]];then skip=1;fi
@@ -97,26 +95,45 @@ for c in `seq 0 0`; do
                                                     
                         t1=`printf "%s = aws_iam_role.%s.arn" $tt1 $trole`
                     fi
-                    if [[ ${tt1} == "content" ]];then 
+
+                   if [[ ${tt1} == "content" ]];then 
+                        tt2=`echo $tt2 | tr -d '"'`
+                        #echo "tt2=$tt2"
+                        if [[ "$tt2" == *"EOT"* ]];then
+                            bs="EOT"
+                            es="EOT"
+                        else
+                            bs="("
+                            es=")"                           
+                        fi
+                        echo "bs=$bs  es=$es"
                         #echo $t1
                         skip=1
                         lbc=0
                         rbc=0
                         breq=0
                         while [[ $breq -eq 0 ]];do 
-                            if [[ "${t1}" == *"("* ]]; then lbc=`expr $lbc + 1`; fi
-                            if [[ "${t1}" == *")"* ]]; then rbc=`expr $rbc + 1`; fi
+                            if [[ "${t1}" == *"${bs}"* ]]; then lbc=`expr $lbc + 1`; fi
+                            if [[ "${t1}" == *"${es}"* ]]; then rbc=`expr $rbc + 1`; fi
                             #echo "$lbc $rbc $t1"
                             read line
                             t1=`echo "$line"`
-                            if [[ $rbc -eq $lbc ]]; then breq=1; fi
+                            if [[ ${bs} != "EOT" ]]; then
+                                if [[ $rbc -eq $lbc ]]; then breq=1; fi
+                            else
+                                if [[ $lbc -eq 2 ]]; then breq=1; fi
+                            fi
+
                         done 
+                        #echo "**** out of content"
                         skip=0
                         t1=`printf "content = file(\"%s.json\")" $rname`
                         printf "lifecycle {\n" >> $fn
                         printf "   ignore_changes = [content]\n" >> $fn
                         printf "}\n" >> $fn
+
                     fi
+
                                                             
                     if [[ ${tt1} == "platform_types" ]];then 
                         #echo $t1
@@ -148,10 +165,6 @@ for c in `seq 0 0`; do
                             if [[ $rbc -eq $lbc ]]; then breq=1; fi
                         done 
                     fi
-
-
-
-
 
                 else
                     if [[ "$t1" == *"subnet-"* ]]; then
@@ -206,5 +219,5 @@ for c in `seq 0 0`; do
 done
 
 
-rm -f t*.txt
+#rm -f t*.txt
 

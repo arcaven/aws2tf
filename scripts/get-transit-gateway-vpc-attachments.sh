@@ -14,7 +14,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -46,17 +46,16 @@ for c in `seq 0 0`; do
             cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].TransitGatewayAttachmentId" | tr -d '"'`
             tgwid=`echo $awsout | jq ".${pref[(${c})]}[(${i})].TransitGatewayId" | tr -d '"'`
             echo "$ttft $cname" $tgwid
-            printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
-            terraform import $ttft.$cname "$cname" | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
-            file="t1.txt"
             fn=`printf "%s__%s.tf" $ttft $cname`
+            if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
+            printf "resource \"%s\" \"%s\" {}" $ttft $cname > $fn
+
+            terraform import $ttft.$cname "$cname" | grep Import
+            terraform state show -no-color $ttft.$cname > t1.txt
+            rm -f $fn
+
+            file="t1.txt"
+
             echo $aws2tfmess > $fn
             while IFS= read line
             do
@@ -78,8 +77,8 @@ for c in `seq 0 0`; do
                     #if [[ ${tt1} == "ipv6_association_id" ]];then skip=1;fi
                     #if [[ ${tt1} == "ipv6_cidr_block" ]];then skip=1;fi
                     if [[ ${tt1} == "vpc_id" ]]; then
-                        tt2=`echo $tt2 | tr -d '"'`
-                        t1=`printf "%s = aws_vpc.%s.id" $tt1 $tt2`
+                        vpcid=`echo $tt2 | tr -d '"'`
+                        t1=`printf "%s = aws_vpc.%s.id" $tt1 $vpcid`
                     fi
                     if [[ ${tt1} == "transit_gateway_id" ]]; then
                         tt2=`echo $tt2 | tr -d '"'`
@@ -99,6 +98,9 @@ for c in `seq 0 0`; do
                 
             done <"$file"
             tgwlist+=( "${tgwid}" )
+            if [[ $vpcid != "" ]];then
+                ../../scripts/100-get-vpc.sh $vpcid
+            fi
             # get the TGW itself
 
         done
@@ -106,9 +108,9 @@ for c in `seq 0 0`; do
         ## defer to TGW
 
         for tgwi in ${tgwlist[@]}; do
-        echo "tgw = $tgwi"
-        ../../scripts/201-get-transit-gateway.sh $tgwi
-        ../../scripts/202-get-transit-gateway-route-tables.sh $tgwi
+            echo "tgw = $tgwi"
+            ../../scripts/201-get-transit-gateway.sh $tgwi
+            ../../scripts/202-get-transit-gateway-route-tables.sh $tgwi
         done
 
     fi

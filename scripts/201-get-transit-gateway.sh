@@ -19,10 +19,10 @@ for c in `seq 0 0`; do
     
     cm=${cmd[$c]}
 	ttft=${tft[(${c})]}
-	#echo $cm
+	echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -35,17 +35,14 @@ for c in `seq 0 0`; do
             fn=`printf "%s__%s.tf" $ttft $cname`
             if [ -f "$fn" ] ; then
                 echo "$fn exists already skipping"
-                exit
+                continue
             fi
             printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
+            printf "}" >> $ttft.$cname.tf
             terraform import $ttft.$cname "$cname" | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            terraform state show -no-color $ttft.$cname > t1.txt
+            rm -f $ttft.$cname.tf
+     
             file="t1.txt"
             fn=`printf "%s__%s.tf" $ttft $cname`
             echo $aws2tfmess > $fn
@@ -75,6 +72,8 @@ for c in `seq 0 0`; do
                 fi
                 
             done <"$file"
+            echo "vpc attachments $cname"
+            ../../scripts/get-transit-gateway-vpc-attachments.sh $cname
 
             dfn=`printf "data/data_%s__%s.tf" $ttft $cname`
             printf "data \"%s\" \"%s\" {\n" $ttft $cname > $dfn

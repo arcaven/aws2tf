@@ -5,13 +5,13 @@ tft[0]="aws_cloudtrail"
 idfilt[0]="SubnetId"
 
 for c in `seq 0 0`; do
-    region=`cat aws.tf | grep region | awk '{print $3}' | tr -d '"'`
+    region=`echo "var.region" | terraform console | tr -d '"'`
     cm=${cmd[$c]}
 	ttft=${tft[(${c})]}
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -24,14 +24,11 @@ for c in `seq 0 0`; do
                 cname=`echo $awsout | jq -r ".${pref[(${c})]}[(${i})].Name"`
                 echo "$ttft $cname"
                 printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-                printf "}" $cname >> $ttft.$cname.tf
+                printf "}" >> $ttft.$cname.tf
                 terraform import $ttft.$cname "$cname" | grep Import
-                terraform state show $ttft.$cname > t2.txt
-                rm $ttft.$cname.tf
-                cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-                #	for k in `cat t1.txt`; do
-                #		echo $k
-                #	done
+                terraform state show -no-color $ttft.$cname > t1.txt
+                rm -f $ttft.$cname.tf
+
                 file="t1.txt"
                 fn=`printf "%s__%s.tf" $ttft $cname`
                 echo $aws2tfmess > $fn
@@ -48,7 +45,7 @@ for c in `seq 0 0`; do
                         if [[ ${tt1} == "home_region" ]];then skip=1;fi
                         if [[ ${tt1} == "s3_bucket_name" ]];then                             
                             s3buck=$(echo $tt2 | tr -d '"')
-                            t1=`printf "%s = aws_s3_bucket.%s.bucket" $tt1 $s3buck`                    
+                            t1=`printf "%s = aws_s3_bucket.b_%s.bucket" $tt1 $s3buck`                    
                         fi
                         if [[ ${tt1} == "cloud_watch_logs_group_arn" ]];then 
                             cwarn=`echo $tt2 | tr -d '"'`

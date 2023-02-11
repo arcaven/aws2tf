@@ -1,13 +1,17 @@
 #!/bin/bash
 if [ "$1" != "" ]; then
-    cmd[0]="$AWS elbv2 describe-load-balancers --query \"LoadBalancers[?Type=='application']|[?VpcId=='$1']\""
+    if [[ "$1" == *"loadbalancer"* ]];then
+        cmd[0]="$AWS elbv2 describe-load-balancers --load-balancer-arns $1"
+    else
+        cmd[0]="$AWS elbv2 describe-load-balancers --query \"LoadBalancers[?Type=='application']|[?VpcId=='$1']\""
+    fi
 else
     cmd[0]="$AWS elbv2 describe-load-balancers --query \"LoadBalancers[?Type=='application']\""
 fi
 c=0
 cm=${cmd[$c]}
 
-pref[0]=""
+pref[0]="LoadBalancers"
 tft[0]="aws_lb"
 idfilt[0]="LoadBalancerArn"
 rm -f ${tft[(${c})]}.*.tf
@@ -16,10 +20,10 @@ for c in `seq 0 0`; do
  
     cm=${cmd[$c]}
 	ttft=${tft[(${c})]}
-	#echo $cm
+	echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -40,22 +44,21 @@ for c in `seq 0 0`; do
             rname=${rname//\//_}
             echo $rname
             fn=`printf "%s__%s.tf" $ttft $rname`
-            
+            if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
 
             printf "resource \"%s\" \"%s\" {\n" $ttft $rname > $fn
             printf "}"  >> $fn
             
             terraform import $ttft.$rname "$cname" | grep Import
-            terraform state show $ttft.$rname > t2.txt
+            terraform state show -no-color $ttft.$rname > t1.txt
             
-            rm $fn
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $fn
+            #cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
+ 
             file="t1.txt"
             
-         
+            subnets=()
+            sgs=()
             #echo "#" > $fn
             echo $aws2tfmess > $fn
             while IFS= read line
@@ -90,15 +93,31 @@ for c in `seq 0 0`; do
                     #if [[ ${tt1} == "ipv6_cidr_block" ]];then skip=1;fi
                     if [[ ${tt1} == "subnet_id" ]]; then
                         tt2=`echo $tt2 | tr -d '"'`
+                        subnets+=`printf "\"%s\" " $tt2`
                         t1=`printf "%s = aws_subnet.%s.id" $tt1 $tt2`
+                    fi
+                    if [[ ${tt1} == "enabled" ]]; then
+                        tt2=`echo $tt2 | tr -d '"'`
+                        if [[ $tt2 == "false" ]];then
+                            printf "bucket = \"\"\n" >> $fn
+                        fi
                     fi
 
 
-                #else
-                #    if [[ "$t1" == *"sg-"* ]]; then
-                #        t1=`echo $t1 | tr -d '"|,'`
-                #        t1=`printf "aws_security_group.%s.id," $t1`
-                #    fi
+
+
+
+                else
+                    if [[ "$t1" == *"sg-"* ]]; then
+                        t1=`echo $t1 | tr -d '"|,'`
+                        sgs+=`printf "\"%s\" " $t1`
+                        t1=`printf "aws_security_group.%s.id," $t1`
+                    fi
+                    if [[ "$t1" == *"subnet-"* ]]; then
+                        t1=`echo $t1 | tr -d '"|,'`
+                        t1=`printf "aws_subnet.%s.id," $t1`
+                    fi
+
                 fi
                 
                 if [ "$skip" == "0" ]; then
@@ -107,10 +126,25 @@ for c in `seq 0 0`; do
                 fi
                 
             done <"$file"
-            echo "Listener ......."
+            #echo "Listener ......."
             ../../scripts/elbv2_listener.sh $lbarn
             echo "Target Group ......."
             ../../scripts/elbv2-target-groups.sh $lbarn
+            for sub in ${subnets[@]}; do
+                sub1=`echo $sub | tr -d '"'`
+                echo "calling for $sub1"
+                if [ "$sub1" != "" ]; then
+                    ../../scripts/105-get-subnet.sh $sub1
+                fi
+            done
+
+            for sg in ${sgs[@]}; do
+                sg1=`echo $sg | tr -d '"'`
+                echo "calling for $sg1"
+                if [ "$sg1" != "" ]; then
+                    ../../scripts/110-get-security-group.sh $sg1
+                fi
+            done
 
         done
         

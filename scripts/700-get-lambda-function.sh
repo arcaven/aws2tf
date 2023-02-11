@@ -20,7 +20,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     if [ "$1" != "" ]; then
@@ -44,12 +44,12 @@ for c in `seq 0 0`; do
                 continue
             fi
             printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
+            printf "}" >> $ttft.$cname.tf
             printf "terraform import %s.%s %s" $ttft $cname $cname > data/import_$ttft_$cname.sh
             terraform import $ttft.$cname "$cname" | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $cname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$cname > t1.txt
+            tfa=`printf "%s.%s" $ttft $cname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #echo $awsj | jq . 
             s3rep=$($AWS lambda get-function --function-name $cname | jq -r .Code.RepositoryType)
             if [ $s3rep == "S3" ]; then
@@ -57,24 +57,29 @@ for c in `seq 0 0`; do
                 echo "Getting Lambda function code:  $cname.zip"
                 curl -s -o $cname.zip ${s3loc}
             fi 
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            rm -f $ttft.$cname.tf
+
             file="t1.txt"
             echo $aws2tfmess > $fn
             sgs=()
             subnets=()
+            doarn=0
             while IFS= read line
             do
 				skip=0
                 # display $line or do something with $line
                 t1=`echo "$line"` 
+                if [[ ${t1} == *"file_system_config"* ]];then doarn=1 ;fi
                 if [[ ${t1} == *"="* ]];then
+
                     tt1=`echo "$line" | cut -f1 -d'=' | tr -d ' '` 
                     tt2=`echo "$line" | cut -f2- -d'='`
-                    if [[ ${tt1} == "arn" ]];then skip=1; fi                
+                    if [[ ${tt1} == "arn" ]];then 
+                        if [[ $doarn == "0" ]];then 
+                            skip=1;
+                            efsarn=`echo "$tt2"` 
+                        fi 
+                    fi                
                     if [[ ${tt1} == "id" ]];then
                         if [ -f "$cname.zip" ]; then 
                             t1=`printf "filename = \"%s.zip\"" $cname`
@@ -92,6 +97,7 @@ for c in `seq 0 0`; do
                     fi
                     if [[ ${tt1} == "qualified_arn" ]];then skip=1;fi
                     if [[ ${tt1} == "version" ]];then skip=1;fi
+                    if [[ ${tt1} == "qualified_invoke_arn" ]];then skip=1;fi
                     if [[ ${tt1} == "source_code_size" ]];then skip=1;fi
                     if [[ ${tt1} == "vpc_id" ]]; then
                         vpcid=`echo $tt2 | tr -d '"'`
@@ -155,6 +161,8 @@ for c in `seq 0 0`; do
 
             if [ "$cname" != "" ]; then
                 ../../scripts/get-lambda-alias.sh $cname
+                ../../scripts/get-lambda-permission.sh $cname
+                ../../scripts/get-lambda-event-invoke-configs.sh $cname
             fi
         
         done

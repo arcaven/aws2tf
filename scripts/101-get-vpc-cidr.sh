@@ -18,7 +18,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=0
@@ -47,19 +47,22 @@ for c in `seq 0 0`; do
                     #echo "cname:$cname"
                     for y in $cname; do
                         #echo "ttft: $ttft cname:$y"
+                        if [[ $y == "null" ]];then
+                            echo "null value if vpc cidr block skipping"
+                            continue
+                        fi
                         fn=`printf "%s__%s.tf" $ttft $y`
+                        if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
+
                         printf "resource \"%s\" \"%s\" {" $ttft $y > $ttft.$y.tf
                         printf "}" $y >> $ttft.$y.tf
                         terraform import $ttft.$y "$y" | grep Import
-                        terraform state show $ttft.$y > t2.txt
+                        terraform state show -no-color $ttft.$y > t1.txt
                         tfa=`printf "data/%s.%s" $ttft $y`
                         terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
                         #echo $awsj | jq . 
                         rm $ttft.$y.tf
-                        cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-                        #	for k in `cat t1.txt`; do
-                        #		echo $k
-                        #	done
+
                         file="t1.txt"
                         echo $aws2tfmess > $fn
                         while IFS= read line

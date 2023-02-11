@@ -1,12 +1,20 @@
 #!/bin/bash
-#!/bin/bash
-#if [ "$1" != "" ]; then
-#    cmd[0]="$AWS iam list-policies"
-#else
+mysub=`echo $AWS2TF_ACCOUNT`
+myreg=`echo $AWS2TF_REGION`
+if [ "$1" != "" ]; then
+    if [[ "$1" != *":aws:policy"* ]];then
+        cmd[0]="$AWS iam get-policy --policy-arn $1"
+        pref[0]="Policy"
+    else
+        echo "skipping AWS managed policy $1"
+        exit
+    fi
+else
     cmd[0]="$AWS iam list-policies --scope Local"
-#fi
+    pref[0]="Policies"
+fi
 
-pref[0]="Policies"
+
 tft[0]="aws_iam_policy"
 getp=0
 for c in `seq 0 0`; do
@@ -16,7 +24,7 @@ for c in `seq 0 0`; do
     #echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -24,10 +32,21 @@ for c in `seq 0 0`; do
         count=`expr $count - 1`
         for i in `seq 0 $count`; do
             #echo $i
-            cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].Arn" | tr -d '"'`
+            # is it AWS Managed ?
+            awsm=""
+
+
+
+            if [ "$1" != "" ]; then
+                pname=`echo $awsout | jq -r ".${pref[(${c})]}.PolicyName"`
+                cname=`echo $awsout | jq ".${pref[(${c})]}.Arn" | tr -d '"'`
+            else
+                pname=`echo $awsout | jq -r ".${pref[(${c})]}[(${i})].PolicyName"`
+                cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].Arn" | tr -d '"'`
+            fi
+
             ocname=`echo $cname`
             cname=`echo $cname | rev | cut -f1 -d'/' | rev `
-            pname=`echo $awsout | jq -r ".${pref[(${c})]}[(${i})].PolicyName"`
 
             if [ "$1" != "" ]; then
               
@@ -43,19 +62,16 @@ for c in `seq 0 0`; do
                 fn=`printf "%s__%s.tf" $ttft $cname`
                 if [ -f "$fn" ] ; then
                     echo "$fn exists already skipping"
-                    exit
+                    continue
                 fi
 
                 echo "$ttft $cname"
                 printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
                 printf "}" >> $ttft.$cname.tf
                 terraform import $ttft.$cname $ocname | grep Import
-                terraform state show $ttft.$cname > t2.txt
-                rm $ttft.$cname.tf
-                cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-                #	for k in `cat t1.txt`; do
-                #		echo $k
-                #	done
+                terraform state show -no-color $ttft.$cname > t1.txt
+                rm -f $ttft.$cname.tf
+
                 file="t1.txt"
                 #fn=`printf "%s__%s.tf" $ttft $cname`
                 #if [ -f "$fn" ] ; then
@@ -63,6 +79,7 @@ for c in `seq 0 0`; do
                 #    exit
                 #fi
                 echo $aws2tfmess > $fn
+                echo "# $0" >> $fn
                 while IFS= read line
                 do
                     skip=0
@@ -73,9 +90,18 @@ for c in `seq 0 0`; do
                         tt2=`echo "$line" | cut -f2- -d'='`
                         if [[ ${tt1} == *":"* ]];then
                             # check tt2 for $
-                            tt2=${tt2//$/&}      
+                            tt2=${tt2//$/&} 
+                            tt1=`echo $tt1 | tr -d '"'`    
                             t1=`printf "\"%s\"=%s" $tt1 "$tt2"`
                         fi
+                        if [[ ${tt1} == "Resource" ]];then 
+                                tt2=${tt2//$/&} 
+                                tt1=`echo $tt1 | tr -d '"'`
+                                t1=`printf "\"%s\"=%s" $tt1 "$tt2"`
+                        fi
+
+
+
                         if [[ ${tt1} == "arn" ]];then skip=1; fi
                         if [[ ${tt1} == "id" ]];then skip=1; fi
                         if [[ ${tt1} == "policy_id" ]];then skip=1; fi

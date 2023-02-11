@@ -1,6 +1,14 @@
 #!/bin/bash
-if [ "$1" != "" ]; then
-    cmd[0]="$AWS events list-rules --event-bus-name $1" 
+bus="default"
+if [[ "$1" != "" ]]; then
+    if [[ "$1" == *"|"* ]]; then
+        bus=$(echo $1 | cut -f1 -d '|')
+        ru=$(echo $1 | cut -f2 -d '|')      
+        cmd[0]="$AWS events describe-rule --name $ru --event-bus-name $bus" 
+    else
+        cmd[0]="$AWS events describe-rule --name $1" # assumes default bus
+    fi
+    
 else
     cmd[0]="$AWS events list-rules"
 fi
@@ -8,6 +16,7 @@ fi
 pref[0]="Rules"
 tft[0]="aws_cloudwatch_event_rule"
 idfilt[0]="Name"
+
 
 #rm -f ${tft[0]}.tf
 
@@ -18,30 +27,42 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
-    count=`echo $awsout | jq ".${pref[(${c})]} | length"`
+    if [[ "$1" != "" ]]; then
+        count=1
+    else
+        count=`echo $awsout | jq ".${pref[(${c})]} | length"`
+    fi
     if [ "$count" -gt "0" ]; then
         count=`expr $count - 1`
         for i in `seq 0 $count`; do
             #echo $i
-            cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}" | tr -d '"'`
-            bus=`echo $awsout | jq ".${pref[(${c})]}[(${i})].EventBusName" | tr -d '"'`
-            echo "$ttft $cname"
-            fn=`printf "%s__%s.tf" $ttft $cname`
-            printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
-            terraform import $ttft.$cname "$cname" | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $cname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
-            #echo $awsj | jq . 
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            if [[ "$1" != "" ]];then 
+                cname=`echo $awsout | jq -r ".${idfilt[(${c})]}"`
+                bus=`echo $awsout | jq -r ".EventBusName"`
+            else
+                cname=`echo $awsout | jq -r ".${pref[(${c})]}[(${i})].${idfilt[(${c})]}"`
+                bus=`echo $awsout | jq -r ".${pref[(${c})]}[(${i})].EventBusName"`
+            fi
+            echo "$ttft $bus $cname"
+
+            fn=`printf "%s__%s__%s.tf" $ttft $bus $cname`
+
+
+            printf "resource \"%s\" \"%s__%s\" {" $ttft $bus $cname > $fn
+            printf "}" >> $fn
+            if [[ "$bus" == "default" ]];then
+                terraform import $ttft.${bus}__${cname} "${cname}" | grep Import
+            else
+                terraform import $ttft.${bus}__${cname} "${bus}/${cname}" | grep Import
+            fi
+            
+            terraform state show -no-color $ttft.${bus}__${cname} > t1.txt
+
+            rm -f $fn
+  
             file="t1.txt"
             echo $aws2tfmess > $fn
             while IFS= read line
@@ -65,9 +86,11 @@ for c in `seq 0 0`; do
                 
             done <"$file"
             
+            ../../scripts/714-get-eb-target.sh "${bus}|${cname}"
+            
         done
     fi 
 done
 
-rm -f t*.txt
+#rm -f t*.txt
 

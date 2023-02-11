@@ -9,7 +9,7 @@ if [ "$1" != "" ]; then
 else
     cln=`$AWS eks list-clusters 2> /dev/null`
     if [ "$cln" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
 
@@ -24,7 +24,7 @@ if [ "$kcount" -gt "0" ]; then
         else
             cln=`$AWS eks list-clusters 2> /dev/null`
             if [ "$cln" == "" ];then
-                echo "You don't have access for this resource"
+                echo "$cm : You don't have access for this resource"
                 exit
             fi
             cln=`$AWS eks list-clusters  | jq ".clusters[(${k})]" | tr -d '"'`         
@@ -35,12 +35,12 @@ if [ "$kcount" -gt "0" ]; then
         cm=${cmd[$c]}
         awsout=`eval $cm 2> /dev/null`
         if [ "$awsout" == "" ];then
-            echo "You don't have access for this resource"
+            echo "$cm : You don't have access for this resource"
             exit
         fi
             
         tcmd=`echo $awsout | jq ".${pref[(${c})]}.resourcesVpcConfig.vpcId" | tr -d '"'`
-        ../../scripts/100* $tcmd  # vpc
+        ../../scripts/100-get-vpc.sh $tcmd  # vpc
         ../../scripts/101* $tcmd  # vpc cidrs
         ../../scripts/105* $tcmd  # subnets
             ## EKS creates it's own SG's with rules
@@ -78,13 +78,16 @@ if [ "$kcount" -gt "0" ]; then
         ../../scripts/135*.sh $tcmd  # TGW
 
             ## need these or will it do it's own ?
+        echo "EKS Route tables for $tcmd"    
         ../../scripts/140*.sh $tcmd  # route table
         ../../scripts/141*.sh $tcmd  # route table assoc
         ../../scripts/161*.sh $tcmd  # vpce
 
         rarn=`echo $awsout | jq ".${pref[(${c})]}.roleArn" | tr -d '"'`
         #echo "rarn=$rarn"
-        ../../scripts/050-get-iam-roles.sh $rarn
+        if [[ $rarn != "" ]];then 
+            ../../scripts/050-get-iam-roles.sh $rarn
+        fi
         csg=`echo $awsout | jq ".${pref[(${c})]}.resourcesVpcConfig.clusterSecurityGroupId" | tr -d '"'`
             #../../scripts/103-get-security_group.sh $csg
 
@@ -102,15 +105,16 @@ if [ "$kcount" -gt "0" ]; then
                 np=`expr $np - 1`
                 for p in `seq 0 $np`; do
                     pname=`echo $fgp | jq ".fargateProfileNames[(${p})]" | tr -d '"'`
-                    echo "faregate profile = $pname"
+                    echo "Fargate profile = $pname"
                     fg=`$AWS eks describe-fargate-profile --cluster-name $cln --fargate-profile-name $pname`
                     #echo "fargate"
                     fgparn=`echo $fg | jq ".fargateProfile.fargateProfileArn" | tr -d '"'`
                     podarn=`echo $fg | jq ".fargateProfile.podExecutionRoleArn" | tr -d '"'`
                     echo "Fargate profile arn = $fgparn" 
-                    echo "Get Fargate Pod execution role arn = $podarn" 
-                    ../../scripts/050-get-iam-roles.sh $podarn
-
+                    echo "Get Fargate Pod execution role arn = $podarn"
+                    if [[ $podarn != "" ]];then
+                        ../../scripts/050-get-iam-roles.sh $podarn
+                    fi
                     # Get the fargate profile
                     #../../scripts/fargate_profile.sh $cname
 
@@ -128,7 +132,7 @@ if [ "$kcount" -gt "0" ]; then
             #echo $cm
             awsout=`eval $cm 2> /dev/null`
             if [ "$awsout" == "" ];then
-                echo "You don't have access for this resource"
+                echo "$cm : You don't have access for this resource"
                 exit
             fi
             count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -143,21 +147,21 @@ if [ "$kcount" -gt "0" ]; then
                     cname=${cname//./_}
                     echo cname = $cname
 
-                    printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-                    printf "}" >> $ttft.$cname.tf
-                    terraform import $ttft.$cname $ocname | grep Import
-                    terraform state show $ttft.$cname > t2.txt
-                    tfa=`printf "data/%s.%s" $ttft $cname`
-                    terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+                    rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
+                    echo "$ttft $cname import"
+                    fn=`printf "%s__%s.tf" $ttft $rname`
+                    if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
+                    printf "resource \"%s\" \"%s\" {}" $ttft $rname > $fn
+
+                    terraform import $ttft.$rname "$ocname" | grep Import
+                    terraform state show -no-color $ttft.$rname > t1.txt
+                    tfa=`printf "%s.%s" $ttft $rname`
+                    terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
                     #cat $tfa.json | jq .
-       
-                    rm $ttft.$cname.tf
-                    cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-                    #	for k in `cat t1.txt`; do
-                    #		echo $k
-                    #	done
+                    rm -f $fn
                     file="t1.txt"
-                    fn=`printf "%s__%s.tf" $ttft $cname`
+                    sgs=()
+                    subnets=()
                     echo $aws2tfmess > $fn
                     while IFS= read line
                     do
@@ -168,13 +172,9 @@ if [ "$kcount" -gt "0" ]; then
                             tt1=`echo "$line" | cut -f1 -d'=' | tr -d ' '`
                             tt2=`echo "$line" | cut -f2- -d'='`
                             if [[ ${tt1} == *":"* ]];then
+                                tt1=`echo $tt1 | tr -d '"'`
                                 t1=`printf "\"%s\"=%s" $tt1 $tt2`
                             fi
-                            #if [[ ${tt1} == "endpoint_public_access" ]];then
-                            #    # must start public and flick over
-                            #    t1=`printf "\"%s\"= false" $tt1`
-                            #fi
-
 
                             if [[ ${tt1} == "arn" ]];then skip=1; fi
                             if [[ ${tt1} == "id" ]];then skip=1; fi
@@ -202,6 +202,7 @@ if [ "$kcount" -gt "0" ]; then
                             if [[ ${tt1} == "created_at" ]];then skip=1;fi
                             if [[ ${tt1} == "endpoint" ]];then skip=1;fi
                             if [[ ${tt1} == "status" ]];then skip=1;fi
+                            if [[ ${tt1} == "service_ipv6_cidr" ]];then skip=1;fi
                             if [[ ${tt1} == "identity" ]];then 
                                 skip=1
                                 read line
@@ -218,27 +219,44 @@ if [ "$kcount" -gt "0" ]; then
                             if [[ ${tt1} == "vpc_id" ]];then skip=1;fi
                             if [[ ${tt1} == "cluster_security_group_id" ]];then skip=1;fi
                             if [[ ${tt1} == "platform_version" ]];then skip=1;fi
+                  
                         else
                             if [[ "$t1" == *"subnet-"* ]]; then
                                 t1=`echo $t1 | tr -d '"|,'`
+                                subnets+=`printf "\"%s\" " $t1`
                                 t1=`printf "aws_subnet.%s.id," $t1`
                             fi
                             if [[ "$t1" == *"sg-"* ]]; then
                                 t1=`echo $t1 | tr -d '"|,'`
+                                sgs+=`printf "\"%s\" " $t1`
                                 t1=`printf "aws_security_group.%s.id," $t1`
                             fi
+
                         fi
                         
-                        if [ "$skip" == "0" ]; then
-                            #echo $skip $t1
-                            echo "$t1" >> $fn
-                        fi
+                        if [ "$skip" == "0" ]; then  echo "$t1" >> $fn ;fi
                         
                     done <"$file"   # done while
 
                     # Get the fargate profile
                     ../../scripts/fargate_profile.sh $cname
 
+                    for sub in ${subnets[@]}; do
+                        #echo "therole=$therole"
+                        sub1=`echo $sub | tr -d '"'`
+                        echo "calling for $sub1"
+                        if [ "$sub1" != "" ]; then
+                            ../../scripts/105-get-subnet.sh $sub1
+                        fi
+                    done
+
+                    for sg in ${sgs[@]}; do
+                        sg1=`echo $sg | tr -d '"'`
+                        echo "calling for $sg1"
+                        if [ "$sg1" != "" ]; then
+                            ../../scripts/110-get-security-group.sh $sg1
+                        fi
+                    done
 
                 done # done for i
             fi
@@ -249,7 +267,7 @@ if [ "$kcount" -gt "0" ]; then
     
 #### Fix up cluster security groups
 
-        #clsg=$(aws eks describe-cluster --name $cln --query cluster.resourcesVpcConfig.clusterSecurityGroupId | jq -r .)
+        #clsg=$($AWS eks describe-cluster --name $cln --query cluster.resourcesVpcConfig.clusterSecurityGroupId | jq -r .)
       
         #echo "Cluster sg = $clsg"
 

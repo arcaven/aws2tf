@@ -15,7 +15,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -23,7 +23,9 @@ for c in `seq 0 0`; do
         count=`expr $count - 1`
         for i in `seq 0 $count`; do
             #echo $i
-            cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].NetworkInterfaceId" | tr -d '"'`
+            cname=`echo $awsout | jq -r ".${pref[(${c})]}[(${i})].NetworkInterfaceId"`
+            # is it the primary ?
+            
             echo "$ttft $cname"
             fn=`printf "%s__%s.tf" $ttft $cname`
             if [ -f "$fn" ] ; then
@@ -32,14 +34,11 @@ for c in `seq 0 0`; do
             fi
             echo $aws2tfmess > $fn
             printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
+            printf "}" >> $ttft.$cname.tf
             terraform import $ttft.$cname "$cname" | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+            terraform state show -no-color $ttft.$cname > t1.txt
+            rm -f $ttft.$cname.tf
+ 
             file="t1.txt"
             echo $aws2tfmess > $fn
             while IFS= read line
@@ -58,7 +57,7 @@ for c in `seq 0 0`; do
                     #if [[ ${tt1} == "public_dns" ]];then skip=1;fi
                     if [[ ${tt1} == "private_dns_name" ]];then skip=1;fi
                     if [[ ${tt1} == "mac_address" ]];then skip=1;fi
-                    #if [[ ${tt1} == "private_ip" ]];then skip=1;fi
+                    if [[ ${tt1} == "private_ips_count" ]];then skip=1;fi
                     if [[ ${tt1} == "domain" ]];then skip=1;fi
                     if [[ ${tt1} == "attachment_id" ]];then skip=1;fi
                     #if [[ ${tt1} == "default_network_acl_id" ]];then skip=1;fi
@@ -66,6 +65,47 @@ for c in `seq 0 0`; do
                     #if [[ ${tt1} == "ipv6_cidr_block" ]];then skip=1;fi
                     if [[ ${tt1} == "ipv6_addresses" ]];then 
                         if [[ ${tt2} == *"[]"* ]];then
+                            skip=1
+                        fi
+                    fi
+
+                    if [[ ${tt1} == "ipv6_address_list" ]];then 
+                        if [[ ${tt2} == *"[]"* ]];then
+                            skip=1
+                        fi
+                    fi
+                    
+                    
+                    if [[ ${tt1} == "ipv4_prefixes" ]]; then
+                        tt2=`echo $tt2 | tr -d '"'`
+                        if [ "$tt2" == "[]" ];then
+                            skip=1
+                        fi
+                    fi
+
+                    if [[ ${tt1} == "ipv6_prefixes" ]]; then
+                        tt2=`echo $tt2 | tr -d '"'`
+                        if [ "$tt2" == "[]" ];then
+                            skip=1
+                        fi
+                    fi
+
+                    if [[ ${tt1} == "private_ip_list" ]];then 
+                        tt2=`echo $tt2 | tr -d '"'` 
+                        skip=1
+                        while [ "$t1" != "]" ] && [ "$tt2" != "[]" ] ;do
+                        #while [[ "$t1" != "]" ]] ;do
+
+                            read line
+                            t1=`echo "$line"`
+                            #echo $t1
+                        done
+                    fi
+
+
+                    if [[ ${tt1} == "interface_type" ]]; then
+                        tt2=`echo $tt2 | tr -d '"'`
+                        if [ "$tt2" == "interface" ];then
                             skip=1
                         fi
                     fi

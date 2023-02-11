@@ -16,7 +16,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -27,17 +27,20 @@ for c in `seq 0 0`; do
             cname=`echo $awsout | jq ".${pref[(${c})]}[(${i})].VpnConnectionId" | tr -d '"'`
             echo "$ttft $cname"
             cgwid=`echo $awsout | jq ".${pref[(${c})]}[(${i})].CustomerGatewayId" | tr -d '"'`
-            printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
-            terraform import $ttft.$cname "$cname" | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
+
+            rname=${cname//:/_} && rname=${rname//./_} && rname=${rname//\//_}
+            echo "$ttft ${cname}"
+            
+            fn=`printf "%s__%s.tf" $ttft $rname`
+            if [ -f "$fn" ] ; then echo "$fn exists already skipping" && continue; fi
+
+            printf "resource \"%s\" \"%s\" {}" $ttft $rname > $fn   
+            terraform import $ttft.${rname} "${cname}" | grep Import
+            terraform state show -no-color $ttft.${rname} > t1.txt
+
+            rm -f $fn
             file="t1.txt"
-            fn=`printf "%s__%s.tf" $ttft $cname`
+
             echo $aws2tfmess > $fn
             while IFS= read line
             do

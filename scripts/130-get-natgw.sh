@@ -1,6 +1,10 @@
 #!/bin/bash
 if [ "$1" != "" ]; then
-    cmd[0]="$AWS ec2 describe-nat-gateways --filter \"Name=state,Values=available\" \"Name=vpc-id,Values=$1\""
+    if [[ "$1" == "nat-"* ]]; then
+        cmd[0]="$AWS ec2 describe-nat-gateways --filter \"Name=state,Values=available\" \"Name=nat-gateway-id,Values=$1\""
+    else
+        cmd[0]="$AWS ec2 describe-nat-gateways --filter \"Name=state,Values=available\" \"Name=vpc-id,Values=$1\""
+    fi
 else
     cmd[0]="$AWS ec2 describe-nat-gateways --filter \"Name=state,Values=available\""
 fi
@@ -18,7 +22,7 @@ for c in `seq 0 0`; do
 	#echo $cm
     awsout=`eval $cm 2> /dev/null`
     if [ "$awsout" == "" ];then
-        echo "You don't have access for this resource"
+        echo "$cm : You don't have access for this resource"
         exit
     fi
     count=`echo $awsout | jq ".${pref[(${c})]} | length"`
@@ -30,28 +34,24 @@ for c in `seq 0 0`; do
             echo "$ttft $cname"
             eipall=`echo $awsout | jq ".${pref[(${c})]}[(${i})].NatGatewayAddresses[0].AllocationId" | tr -d '"'`
             echo "eipall = $eipall"
+
             fn=`printf "%s__%s.tf" $ttft $cname`
             if [ -f "$fn" ] ; then
                 echo "$fn exists already skipping"
-                exit
+                continue
             fi
-  
 
             printf "resource \"%s\" \"%s\" {" $ttft $cname > $ttft.$cname.tf
-            printf "}" $cname >> $ttft.$cname.tf
+            printf "}" >> $ttft.$cname.tf
             terraform import $ttft.$cname "$cname" | grep Import
-            terraform state show $ttft.$cname > t2.txt
-            tfa=`printf "data/%s.%s" $ttft $cname`
-            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > $tfa.json
+            terraform state show -no-color $ttft.$cname > t1.txt
+            tfa=`printf "%s.%s" $ttft $cname`
+            terraform show  -json | jq --arg myt "$tfa" '.values.root_module.resources[] | select(.address==$myt)' > data/$tfa.json
             #cat $tfa.json | jq .
+            rm -f $ttft.$cname.tf
 
-            rm $ttft.$cname.tf
-            cat t2.txt | perl -pe 's/\x1b.*?[mGKH]//g' > t1.txt
-            #	for k in `cat t1.txt`; do
-            #		echo $k
-            #	done
-            file="t1.txt"
-           
+            file="t1.txt"        
+            subnets=() 
             echo $aws2tfmess > $fn
             while IFS= read line
             do
@@ -78,6 +78,8 @@ for c in `seq 0 0`; do
                     if [[ ${tt1} == "subnet_id" ]]; then
                         tt2=`echo $tt2 | tr -d '"'`
                         t1=`printf "%s = aws_subnet.%s.id" $tt1 $tt2`
+                        subnets+=`printf "\"%s\" " $tt2`
+
                     fi
                     if [[ ${tt1} == "allocation_id" ]]; then
                         tt2=`echo $tt2 | tr -d '"'`
@@ -93,6 +95,15 @@ for c in `seq 0 0`; do
                 
             done <"$file"
             ../../scripts/get-eip.sh $eipall
+            for sub in ${subnets[@]}; do
+                #echo "therole=$therole"
+                sub1=`echo $sub | tr -d '"'`
+                echo "calling for $sub1"
+                if [ "$sub1" != "" ]; then
+                    ../../scripts/105-get-subnet.sh $sub1
+                fi
+            done
+
             
         done
 
